@@ -475,6 +475,11 @@
     document.documentElement.style.opacity = '1';
   });
 
+  /* expose cart internals for sub-toggle module */
+  window.__gr_cart       = cart;
+  window.__gr_updateCart = updateCartUI;
+  window.__gr_toast      = showToast;
+
 })();
 
 /* ═══════════════════════════════════════════════
@@ -1090,5 +1095,193 @@
   }
 
   quizRestartBtn?.addEventListener('click', resetQuiz);
+
+})();
+
+/* ═══════════════════════════════════════════════
+   SUBSCRIPTION & SAVE TOGGLE
+   ═══════════════════════════════════════════════ */
+(() => {
+  'use strict';
+
+  const DISC = 0.15;
+
+  function fmt(n) {
+    return '₹' + Math.round(n).toLocaleString('en-IN');
+  }
+
+  function makeToggle() {
+    const el = document.createElement('div');
+    el.className = 'sub-toggle';
+    el.innerHTML =
+      '<button class="sub-opt active" data-type="once">One-time</button>' +
+      '<button class="sub-opt" data-type="sub">🔄 Subscribe &amp; Save</button>';
+    return el;
+  }
+
+  /* ── Shop cards ── */
+  document.querySelectorAll('.shop-card-body').forEach(body => {
+    const cartBtn = body.querySelector('.add-cart-btn');
+    if (!cartBtn) return;
+
+    const origPrice = +cartBtn.dataset.price;
+    const subPrice  = Math.round(origPrice * (1 - DISC));
+    const priceEl   = body.querySelector('.shop-price');
+    const origText  = priceEl ? priceEl.textContent.trim() : fmt(origPrice);
+
+    const saveBadge = document.createElement('span');
+    saveBadge.className = 'sub-save-tag';
+    saveBadge.textContent = '15% OFF';
+    if (priceEl) priceEl.appendChild(saveBadge);
+
+    const toggle = makeToggle();
+    const priceRow = body.querySelector('.shop-price-row');
+    const insertRef = priceRow || cartBtn;
+    insertRef.parentNode.insertBefore(toggle, insertRef);
+
+    toggle.addEventListener('click', e => {
+      const opt = e.target.closest('.sub-opt');
+      if (!opt) return;
+      toggle.querySelectorAll('.sub-opt').forEach(o => o.classList.remove('active'));
+      opt.classList.add('active');
+
+      const isSub = opt.dataset.type === 'sub';
+      if (priceEl) {
+        if (isSub) {
+          priceEl.innerHTML =
+            '<span class="sub-strike">' + origText + '</span>' + fmt(subPrice) +
+            ' <span class="sub-monthly-label">/ mo</span>';
+          const nb = document.createElement('span');
+          nb.className = 'sub-save-tag visible';
+          nb.textContent = '15% OFF';
+          priceEl.appendChild(nb);
+        } else {
+          priceEl.textContent = origText;
+          const nb = document.createElement('span');
+          nb.className = 'sub-save-tag';
+          nb.textContent = '15% OFF';
+          priceEl.appendChild(nb);
+        }
+      }
+
+      const baseName = cartBtn.dataset.product.replace(' (Subscribe)', '');
+      cartBtn.dataset.price   = isSub ? subPrice : origPrice;
+      cartBtn.dataset.product = isSub ? baseName + ' (Subscribe)' : baseName;
+    });
+  });
+
+  /* ── Featured product cards ── */
+  const PROD_MAP = {
+    moringa:   { cartName: 'Moringa Powder',          cartPrice: 599  },
+    dosa:      { cartName: 'Munagaku Dosa Batter',    cartPrice: 349  },
+    curry:     { cartName: 'Curry Leaf Powder',       cartPrice: 299  },
+    lionsmane: { cartName: "Lion's Mane Powder",      cartPrice: 799  },
+    mushblend: { cartName: 'Mushroom 5-Blend',        cartPrice: 899  },
+    coffee:    { cartName: 'Mushroom Coffee',         cartPrice: 649  },
+    ashwa:     { cartName: 'Ashwagandha Powder',      cartPrice: 549  },
+    turmeric:  { cartName: 'Turmeric Blend',          cartPrice: 449  },
+    bundle:    { cartName: 'Daily Essentials Bundle', cartPrice: 1799 }
+  };
+
+  document.querySelectorAll('.product-card[data-pid]').forEach(card => {
+    const pid  = card.dataset.pid;
+    const data = PROD_MAP[pid];
+    if (!data) return;
+
+    const { cartName, cartPrice } = data;
+    const subPrice   = Math.round(cartPrice * (1 - DISC));
+    const priceEl    = card.querySelector('.product-price');
+    const linkBtn    = card.querySelector('.product-footer .btn-sm');
+    const footer     = card.querySelector('.product-footer');
+    if (!priceEl || !linkBtn || !footer) return;
+
+    const origPriceHTML = priceEl.innerHTML;
+
+    /* save badge next to price */
+    const saveBadge = document.createElement('span');
+    saveBadge.className = 'sub-save-tag';
+    saveBadge.textContent = '15% OFF';
+    priceEl.appendChild(saveBadge);
+
+    /* toggle inserted above the footer row */
+    const toggle = makeToggle();
+    footer.parentNode.insertBefore(toggle, footer);
+
+    /* convert the anchor to a real add-to-cart button */
+    linkBtn.removeAttribute('href');
+    linkBtn.style.cursor = 'pointer';
+    let isSub = false;
+
+    linkBtn.addEventListener('click', e => {
+      e.preventDefault();
+      const cart    = window.__gr_cart;
+      const update  = window.__gr_updateCart;
+      const toast   = window.__gr_toast;
+      if (!cart || !update) return;
+
+      const price = isSub ? subPrice : cartPrice;
+      const name  = isSub ? cartName + ' (Subscribe)' : cartName;
+      const existing = cart.find(i => i.name === name);
+      if (existing) {
+        existing.qty++;
+      } else {
+        cart.push({ name, price, qty: 1 });
+      }
+      update();
+      if (toast) toast('✓ ' + cartName + ' added to cart!');
+
+      const orig = linkBtn.textContent;
+      linkBtn.textContent = '✓ Added!';
+      linkBtn.style.background = 'linear-gradient(135deg,#155534,#0f3d25)';
+      setTimeout(() => {
+        linkBtn.textContent = orig;
+        linkBtn.style.background = '';
+      }, 1500);
+    });
+
+    toggle.addEventListener('click', e => {
+      const opt = e.target.closest('.sub-opt');
+      if (!opt) return;
+      toggle.querySelectorAll('.sub-opt').forEach(o => o.classList.remove('active'));
+      opt.classList.add('active');
+      isSub = opt.dataset.type === 'sub';
+
+      if (isSub) {
+        priceEl.innerHTML =
+          '<span class="sub-strike">₹' + cartPrice.toLocaleString('en-IN') + '</span>' +
+          fmt(subPrice) + ' <span class="sub-monthly-label">/ mo</span>';
+        const nb = document.createElement('span');
+        nb.className = 'sub-save-tag visible';
+        nb.textContent = '15% OFF';
+        priceEl.appendChild(nb);
+        linkBtn.textContent = 'Subscribe →';
+      } else {
+        priceEl.innerHTML = origPriceHTML;
+        const nb = document.createElement('span');
+        nb.className = 'sub-save-tag';
+        nb.textContent = '15% OFF';
+        priceEl.appendChild(nb);
+        linkBtn.textContent = 'Add to Cart →';
+      }
+    });
+  });
+
+  /* ── Cart drawer: render (Subscribe) items with a pill badge ── */
+  const origUpdateCart = window.__gr_updateCart;
+  if (origUpdateCart) {
+    window.__gr_updateCart = function() {
+      origUpdateCart();
+      document.querySelectorAll('#drawerItems .drawer-item h4').forEach(h4 => {
+        if (h4.textContent.includes('(Subscribe)') && !h4.querySelector('.sub-pill')) {
+          h4.textContent = h4.textContent.replace(' (Subscribe)', '');
+          const pill = document.createElement('span');
+          pill.className = 'sub-pill';
+          pill.textContent = '🔄 Monthly';
+          h4.appendChild(pill);
+        }
+      });
+    };
+    window.__gr_updateCart();
+  }
 
 })();
